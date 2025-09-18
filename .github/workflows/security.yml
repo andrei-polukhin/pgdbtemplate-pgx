@@ -1,0 +1,51 @@
+name: Security Scan
+
+on:
+  schedule:
+    # Run security scan weekly on Monday at 2 AM UTC.
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.24'
+
+    - name: Run Gosec Security Scanner
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec ./...
+
+    - name: Run staticcheck
+      run: |
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        staticcheck ./...
+
+    - name: Check for known vulnerabilities  
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+
+    - name: Dependency audit
+      run: |
+        # Use go mod tidy and verify for basic dependency checks.
+        go mod tidy
+        go mod verify
+
+    - name: Audit Go modules
+      run: |
+        go mod download
+        # Show dependency graph for review.
+        go mod graph | head -20
