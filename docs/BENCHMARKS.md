@@ -1,7 +1,7 @@
-# Performance Benchmarks: `pgdbtemplate` vs Traditional Database Creation
+# Performance Benchmarks: `pgdbtemplate-pgx` vs Traditional Database Creation
 
 This document presents comprehensive benchmark results comparing the performance
-of using PostgreSQL template databases (via `pgdbtemplate`) versus
+of using PostgreSQL template databases (via `pgdbtemplate-pgx` with `pgx` driver) versus
 traditional database creation and migration approaches.
 
 ## Benchmark Environment
@@ -10,6 +10,7 @@ traditional database creation and migration approaches.
 - **Operating System**: macOS (darwin/arm64)
 - **PostgreSQL**: Local PostgreSQL instance
 - **Go Version**: 1.20+
+- **Driver**: pgx/v5 with connection pooling
 - **Test Schema**: 5 tables with indexes, foreign keys, and sample data
 
 ## Test Schema Complexity
@@ -27,10 +28,10 @@ The benchmarks use a realistic schema with:
 
 | Approach | 1 Table | 3 Tables | 5 Tables | Scaling Behavior |
 |----------|---------|----------|----------|------------------|
-| **Traditional** | ~32.5ms | ~42.4ms | ~47.4ms | **Increases with complexity** |
-| **Template** | ~31.3ms | ~31.0ms | ~31.9ms | **🚀 Consistent performance** |
+| **Traditional** | ~30.6ms | ~36.4ms | ~45.6ms | **Increases with complexity** |
+| **Template** | ~31.6ms | ~33.5ms | ~35.1ms | **🚀 Consistent performance** |
 
-**Key Insight**: Template approach maintains constant performance regardless of
+**Key Insight**: Template approach maintains consistent performance regardless of
 schema complexity, while traditional approach scales linearly
 with the number of tables and migrations.
 
@@ -39,9 +40,9 @@ with the number of tables and migrations.
 The performance difference becomes more pronounced as schema complexity increases:
 
 **Performance Gain by Schema Size**:
-- 1 Table: Template is **1.03x faster** (28.2ms vs 28.9ms)
-- 3 Tables: Template is **1.43x faster** (27.6ms vs 39.5ms)  
-- 5 Tables: Template is **1.50x faster** (28.8ms vs 43.1ms)
+- 1 Table: Template is **0.97x faster** (31.6ms vs 30.6ms)
+- 3 Tables: Template is **1.09x faster** (33.5ms vs 36.4ms)  
+- 5 Tables: Template is **1.30x faster** (35.1ms vs 45.6ms)
 
 **Why Templates Scale Better**:
 - Traditional approach: Each table, index, and constraint
@@ -55,46 +56,48 @@ The performance difference becomes more pronounced as schema complexity increase
 
 | Number of Databases | Traditional | Template | Improvement |
 |---------------------|-------------|----------|-------------|
-| 1 DB | 46.8ms | 46.7ms | **0.99x faster** |
-| 5 DBs | 224.7ms (44.8ms/db) | 179.4ms (33.2ms/db) | **🚀 1.35x faster** |
-| 10 DBs | 455.4ms (46.1ms/db) | 334.2ms (31.7ms/db) | **🚀 1.45x faster** |
-| 20 DBs | 922.5ms (45.3ms/db) | 726.5ms (33.6ms/db) | **🚀 1.35x faster** |
-| 50 DBs | 2.33s (46.5ms/db) | 1.59s (31.1ms/db) | **🚀 1.50x faster** |
-| 200 DBs | 9.45s (47.3ms/db) | 6.19s (30.8ms/db) | **🚀 1.54x faster** |
+| 1 DB | 42.5ms | 44.8ms | **0.95x slower** |
+| 5 DBs | 48.3ms/db | 39.4ms/db | **🚀 1.23x faster** |
+| 10 DBs | 44.3ms/db | 35.9ms/db | **🚀 1.23x faster** |
+| 20 DBs | 44.3ms/db | 36.8ms/db | **🚀 1.20x faster** |
+| 50 DBs | 44.0ms/db | 35.0ms/db | **🚀 1.26x faster** |
+| 200 DBs | 43.9ms/db | 35.0ms/db | **🚀 1.25x faster** |
 | 500 DBs | 23.68s (47.4ms/db) | 15.61s (31.1ms/db) | **🚀 1.52x faster** |
 
 ### Concurrent Performance
 
 | Approach | Operations/sec | Concurrent Safety |
 |----------|----------------|-------------------|
-| **Traditional** | ~70 ops/sec | ✅ Good concurrency |
-| **Template** | **~76 ops/sec** | ✅ Thread-safe |
+| **Traditional** | ~46 ops/sec | ✅ Good concurrency |
+| **Template** | **~52 ops/sec** | ✅ Thread-safe |
 
 ## Detailed Analysis
 
 ### 1. **Consistent Performance Benefits**
 
-The template approach shows **32-58% performance improvement** at scale:
-- Single database: **Comparable** (28ms vs 44ms for 5-table schema)  
-- At scale (20 DBs): **1.33x faster** (29.9ms/db vs 39.8ms/db)
-- **Consistent per-database time**: Template approach maintains ~30-35ms
+The template approach shows **16-30% performance improvement** at scale:
+- Single database: **Comparable** (35.1ms vs 45.6ms for 5-table schema)  
+- At scale (20 DBs): **1.20x faster** (36.8ms/db vs 44.3ms/db)
+- **Consistent per-database time**: Template approach maintains ~35-37ms
   per database regardless of scale
 
 ### 2. **Superior Concurrency**
 
-- ✅ **Template approach**: Thread-safe, **~78 ops/sec** concurrent performance
-- ✅ **Traditional approach**: **~69 ops/sec**, good concurrent handling
-- Both approaches now handle concurrency well with proper database naming strategies
+- ✅ **Template approach**: Thread-safe, **~52 ops/sec** concurrent performance
+- ✅ **Traditional approach**: **~46 ops/sec**, good concurrent handling
+- Both approaches handle concurrency well with proper database naming strategies
 
 ### 3. **Memory Efficiency**
 
-- **Template approach**: ~89KB memory usage per operation
+- **Template approach**: ~141KB memory usage per operation
 - **Traditional approach**: ~106KB memory usage per operation
-- **~17% less memory** usage with templates
+- **~25% more memory** usage (pgx connection pool overhead)
+
+*Note: pgx uses more memory than lib/pq due to advanced connection pooling and type handling features.*
 
 ### 4. **One-Time Initialization Cost**
 
-Template initialization (one-time setup): **~49ms**
+Template initialization (one-time setup): **~77ms**
 - This is a **one-time cost** regardless of how many test databases you create
 - **Break-even point**: After creating just **2 databases**, you've recovered
   the initialization cost
