@@ -2,6 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/andrei-polukhin/pgdbtemplate-pgx.svg)](https://pkg.go.dev/github.com/andrei-polukhin/pgdbtemplate-pgx)
 [![CI](https://github.com/andrei-polukhin/pgdbtemplate-pgx/actions/workflows/test.yml/badge.svg)](https://github.com/andrei-polukhin/pgdbtemplate-pgx/actions/workflows/test.yml)
+[![Coverage](https://codecov.io/gh/andrei-polukhin/pgdbtemplate-pgx/branch/main/graph/badge.svg)](https://codecov.io/gh/andrei-polukhin/pgdbtemplate-pgx)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/andrei-polukhin/pgdbtemplate-pgx/blob/main/LICENSE)
 
 A PostgreSQL connection provider for
