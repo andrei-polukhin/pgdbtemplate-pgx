@@ -206,6 +206,18 @@ func TestPgxConnectionProvider(t *testing.T) {
 		_, err := provider.Connect(ctx, "postgres")
 		c.Assert(err, qt.ErrorMatches, "failed to create connection pool:.*")
 	})
+
+	c.Run("Context cancellation during pool creation", func(c *qt.C) {
+		// Create a context that gets cancelled immediately.
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cancel()
+
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+		defer provider.Close()
+
+		_, err := provider.Connect(cancelCtx, "postgres")
+		c.Assert(err, qt.ErrorMatches, "failed to ping database:.*")
+	})
 }
 
 func TestTemplateManagerWithPgx(t *testing.T) {
