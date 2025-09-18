@@ -10,6 +10,7 @@ import (
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/andrei-polukhin/pgdbtemplate"
@@ -184,14 +185,18 @@ func benchmarkTraditionalDatabaseCreation(b *testing.B, numTables int) {
 		c.Assert(adminDB.Close(), qt.IsNil)
 
 		// Connect to the new database and run migrations.
-		testDB, err := sql.Open("postgres", benchConnectionStringFunc(dbName))
+		connString := benchConnectionStringFunc(dbName)
+		config, err := pgxpool.ParseConfig(connString)
+		c.Assert(err, qt.IsNil)
+
+		testPool, err := pgxpool.NewWithConfig(ctx, config)
 		c.Assert(err, qt.IsNil)
 
 		// Run migrations.
-		conn := &pgdbtemplate.StandardDatabaseConnection{DB: testDB}
+		conn := &pgdbtemplatepgx.DatabaseConnection{Pool: testPool}
 		err = migrationRunner.RunMigrations(ctx, conn)
 		c.Assert(err, qt.IsNil)
-		c.Assert(testDB.Close(), qt.IsNil)
+		testPool.Close()
 
 		// Cleanup.
 		adminDB, err = sql.Open("postgres", testConnectionString)
@@ -309,12 +314,16 @@ func BenchmarkConcurrentDatabaseCreation_Traditional(b *testing.B) {
 			c.Assert(adminDB.Close(), qt.IsNil)
 
 			// Connect and run migrations.
-			testDB, err := sql.Open("postgres", benchConnectionStringFunc(dbName))
+			connString := benchConnectionStringFunc(dbName)
+			config, err := pgxpool.ParseConfig(connString)
 			c.Assert(err, qt.IsNil)
 
-			conn := &pgdbtemplate.StandardDatabaseConnection{DB: testDB}
+			testPool, err := pgxpool.NewWithConfig(ctx, config)
+			c.Assert(err, qt.IsNil)
+
+			conn := &pgdbtemplatepgx.DatabaseConnection{Pool: testPool}
 			err = migrationRunner.RunMigrations(ctx, conn)
-			c.Assert(testDB.Close(), qt.IsNil)
+			testPool.Close()
 			c.Assert(err, qt.IsNil)
 
 			// Cleanup.
@@ -513,13 +522,17 @@ func benchmarkTraditionalBulkCleanup(b *testing.B, numDBs int) {
 			c.Assert(adminDB.Close(), qt.IsNil)
 
 			// Connect and run migrations.
-			testDB, err := sql.Open("postgres", benchConnectionStringFunc(dbName))
+			connString := benchConnectionStringFunc(dbName)
+			config, err := pgxpool.ParseConfig(connString)
 			c.Assert(err, qt.IsNil)
 
-			conn := &pgdbtemplate.StandardDatabaseConnection{DB: testDB}
+			testPool, err := pgxpool.NewWithConfig(ctx, config)
+			c.Assert(err, qt.IsNil)
+
+			conn := &pgdbtemplatepgx.DatabaseConnection{Pool: testPool}
 			err = migrationRunner.RunMigrations(ctx, conn)
 			c.Assert(err, qt.IsNil)
-			c.Assert(testDB.Close(), qt.IsNil)
+			testPool.Close()
 		}
 		b.StartTimer()
 
@@ -582,14 +595,17 @@ func benchmarkTraditionalSequential(b *testing.B, numDBs int) {
 		c.Assert(err, qt.IsNil)
 		c.Assert(adminDB.Close(), qt.IsNil)
 
-		// Connect and run migrations.
-		testDB, err := sql.Open("postgres", benchConnectionStringFunc(dbName))
+		connString := benchConnectionStringFunc(dbName)
+		config, err := pgxpool.ParseConfig(connString)
 		c.Assert(err, qt.IsNil)
 
-		conn := &pgdbtemplate.StandardDatabaseConnection{DB: testDB}
+		testPool, err := pgxpool.NewWithConfig(ctx, config)
+		c.Assert(err, qt.IsNil)
+
+		conn := &pgdbtemplatepgx.DatabaseConnection{Pool: testPool}
 		err = migrationRunner.RunMigrations(ctx, conn)
 		c.Assert(err, qt.IsNil)
-		c.Assert(testDB.Close(), qt.IsNil)
+		testPool.Close()
 
 		// Cleanup.
 		adminDB, err = sql.Open("postgres", testConnectionString)
@@ -750,7 +766,7 @@ func benchmarkRealisticTraditionalWorkflow(b *testing.B, numTests, numTables int
 
 	for i := 0; i < b.N; i++ {
 		var dbNames []string
-		var testConns []*sql.DB
+		var testPools []*pgxpool.Pool
 
 		// Simulate running multiple tests (each creates database + runs migrations).
 		for j := 0; j < numTests; j++ {
@@ -766,24 +782,28 @@ func benchmarkRealisticTraditionalWorkflow(b *testing.B, numTests, numTables int
 			c.Assert(adminDB.Close(), qt.IsNil)
 
 			// Connect and run migrations.
-			testDB, err := sql.Open("postgres", benchConnectionStringFunc(dbName))
+			connString := benchConnectionStringFunc(dbName)
+			config, err := pgxpool.ParseConfig(connString)
 			c.Assert(err, qt.IsNil)
 
-			conn := &pgdbtemplate.StandardDatabaseConnection{DB: testDB}
+			testPool, err := pgxpool.NewWithConfig(ctx, config)
+			c.Assert(err, qt.IsNil)
+
+			conn := &pgdbtemplatepgx.DatabaseConnection{Pool: testPool}
 			err = migrationRunner.RunMigrations(ctx, conn)
 			c.Assert(err, qt.IsNil)
 
 			// Simulate some database work.
 			var count int
-			err = testDB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+			err = testPool.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&count)
 			c.Assert(err, qt.IsNil)
 
-			testConns = append(testConns, testDB)
+			testPools = append(testPools, testPool)
 		}
 
 		// Close all connections.
-		for _, conn := range testConns {
-			c.Assert(conn.Close(), qt.IsNil)
+		for _, pool := range testPools {
+			pool.Close()
 		}
 
 		// Bulk cleanup (similar to what our Cleanup() does).
