@@ -223,6 +223,11 @@ The pgx implementation provides excellent performance through:
 - **Advanced type support** - Native PostgreSQL type handling
 - **Optimized for concurrency** - Designed for high-throughput applications
 
+## Security
+
+If you discover a security vulnerability, please report it responsibly.
+See [SECURITY.md](docs/SECURITY.md) for our security policy and reporting process.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
