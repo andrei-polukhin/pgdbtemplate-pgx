@@ -87,7 +87,12 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 	return &DatabaseConnection{Pool: pool}, nil
 }
 
-// Close implements pgdbtemplate.ConnectionProvider.Close.
+// GetNoRowsSentinel implements pgdbtemplate.ConnectionProvider.GetNoRowsSentinel.
+func (*ConnectionProvider) GetNoRowsSentinel() error {
+	return pgx.ErrNoRows
+}
+
+// Close closes all connection pools managed by this provider.
 func (p *ConnectionProvider) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -96,11 +101,6 @@ func (p *ConnectionProvider) Close() {
 		pool.Close()
 	}
 	p.pools = make(map[string]*pgxpool.Pool)
-}
-
-// GetNoRowsSentinel implements pgdbtemplate.ConnectionProvider.GetNoRowsSentinel.
-func (*ConnectionProvider) GetNoRowsSentinel() error {
-	return pgx.ErrNoRows
 }
 
 // DatabaseConnection implements pgdbtemplate.DatabaseConnection using pgx.
@@ -121,6 +121,9 @@ func (c *DatabaseConnection) QueryRowContext(ctx context.Context, query string, 
 }
 
 // Close implements pgdbtemplate.DatabaseConnection.Close.
+//
+// This method does not close the underlying pool, as it might be shared.
+// The pool will be closed when ConnectionProvider.Close() is called.
 func (*DatabaseConnection) Close() error {
 	// Note: We don't close the pool here as it might be shared.
 	// The pool will be closed when ConnectionProvider.Close() is called.

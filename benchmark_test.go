@@ -217,6 +217,7 @@ func benchmarkTemplateDatabaseCreation(b *testing.B, numTables int) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,
@@ -346,6 +347,7 @@ func BenchmarkConcurrentDatabaseCreation_Template(b *testing.B) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,
@@ -394,6 +396,7 @@ func BenchmarkTemplateInitialization(b *testing.B) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,
@@ -445,6 +448,7 @@ func benchmarkTemplateComprehensiveCleanup(b *testing.B, numDBs int) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,
@@ -629,6 +633,7 @@ func benchmarkTemplateSequential(b *testing.B, numDBs int) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,
@@ -701,6 +706,7 @@ func benchmarkRealisticTemplateWorkflow(b *testing.B, numTests, numTables int) {
 	c.Assert(err, qt.IsNil)
 
 	connProvider := pgdbtemplatepgx.NewConnectionProvider(benchConnectionStringFunc)
+	defer connProvider.Close()
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
 		[]string{tempDir},
 		pgdbtemplate.AlphabeticalMigrationFilesSorting,

@@ -48,6 +48,7 @@ func main() {
 		pgdbtemplatepgx.WithMaxConns(25),
 		pgdbtemplatepgx.WithMinConns(5),
 	)
+	defer provider.Close() // Close all connection pools.
 
 	// Create migration runner.
 	migrationRunner := pgdbtemplate.NewFileMigrationRunner(
@@ -104,6 +105,7 @@ import (
 )
 
 var templateManager *pgdbtemplate.TemplateManager
+var provider *pgdbtemplatepgx.ConnectionProvider
 
 func TestMain(m *testing.M) {
 	// Setup template manager once.
@@ -116,6 +118,7 @@ func TestMain(m *testing.M) {
 
 	// Cleanup.
 	templateManager.Cleanup(context.Background())
+	provider.Close()
 	os.Exit(code)
 }
 
@@ -127,7 +130,7 @@ func setupTemplateManager() error {
 		return pgdbtemplate.ReplaceDatabaseInConnectionString(baseConnString, dbName)
 	}
 
-	provider := pgdbtemplatepgx.NewConnectionProvider(
+	provider = pgdbtemplatepgx.NewConnectionProvider(
 		connStringFunc,
 		pgdbtemplatepgx.WithMaxConns(10),
 		pgdbtemplatepgx.WithMinConns(2),
@@ -211,6 +214,7 @@ from multiple goroutines. Connection pools are shared across multiple
 - Use connection pooling options appropriate for your test load
 - Set `POSTGRES_CONNECTION_STRING` environment variable for tests
 - Close connections and drop test databases after use
+- Call `provider.Close()` to release all connection pools when done
 - Use context timeouts for connection operations
 - Configure MinConns > 0 for better performance in concurrent scenarios
 
