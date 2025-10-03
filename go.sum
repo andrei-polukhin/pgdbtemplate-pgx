@@ -1,5 +1,5 @@
-github.com/andrei-polukhin/pgdbtemplate v1.0.0 h1:dPNC7oFWWngSdBcOitTsG3XSKB9qzOcYqvgXnPjW7NM=
-github.com/andrei-polukhin/pgdbtemplate v1.0.0/go.mod h1:JsHTJmrYkOYaESclpJJbQxIseMKk/k4kpcm4ixynQ3Q=
+github.com/andrei-polukhin/pgdbtemplate v1.0.1 h1:N/KYSRoNM9aaID4yUTAtPx265f86ccouuMfTgZ/293Y=
+github.com/andrei-polukhin/pgdbtemplate v1.0.1/go.mod h1:JsHTJmrYkOYaESclpJJbQxIseMKk/k4kpcm4ixynQ3Q=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
