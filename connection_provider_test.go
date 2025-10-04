@@ -446,9 +446,6 @@ func TestPgxConnectionProvider(t *testing.T) {
 		// Close should not panic even without provider.
 		err = conn.Close()
 		c.Assert(err, qt.IsNil)
-
-		// Manually close the pool since it's not tracked.
-		pool.Close()
 	})
 
 	c.Run("Concurrent Close() calls on provider", func(c *qt.C) {
@@ -572,4 +569,62 @@ func createTestMigrationRunner(c *qt.C) pgdbtemplate.MigrationRunner {
 	c.Assert(err, qt.IsNil)
 
 	return pgdbtemplate.NewFileMigrationRunner([]string{tempDir}, pgdbtemplate.AlphabeticalMigrationFilesSorting)
+}
+
+// TestHighConcurrencyPoolCreation tests that multiple goroutines creating pools
+// simultaneously don't block each other unnecessarily and only one pool is created.
+func TestHighConcurrencyPoolCreation(t *testing.T) {
+	t.Parallel()
+	c := qt.New(t)
+	ctx := context.Background()
+
+	provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+	defer provider.Close()
+
+	const numGoroutines = 50
+	dbName := "postgres"
+
+	start := make(chan struct{})
+	errors := make(chan error, numGoroutines)
+	connections := make(chan pgdbtemplate.DatabaseConnection, numGoroutines)
+
+	// Launch many goroutines that try to connect simultaneously.
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			<-start // Wait for signal to start.
+			conn, err := provider.Connect(ctx, dbName)
+			errors <- err
+			connections <- conn
+		}()
+	}
+
+	// Signal all goroutines to start at once.
+	close(start)
+
+	// Collect all results.
+	conns := make([]pgdbtemplate.DatabaseConnection, 0, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		err := <-errors
+		c.Assert(err, qt.IsNil, qt.Commentf("goroutine %d failed", i))
+
+		conn := <-connections
+		conns = append(conns, conn)
+	}
+
+	// All connections should work.
+	c.Assert(len(conns), qt.Equals, numGoroutines)
+
+	// Verify a few connections can execute queries.
+	for i := 0; i < 10; i++ {
+		var value int
+		row := conns[i].QueryRowContext(ctx, fmt.Sprintf("SELECT %d", i+1))
+		err := row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, i+1)
+	}
+
+	// Close all connections.
+	for _, conn := range conns {
+		conn.Close()
+	}
 }

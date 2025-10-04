@@ -143,6 +143,7 @@ func (c *DatabaseConnection) Close() error {
 	if c.provider == nil {
 		// Connection created without provider tracking.
 		// Happens if someone creates DatabaseConnection manually.
+		c.Pool.Close()
 		return nil
 	}
 
