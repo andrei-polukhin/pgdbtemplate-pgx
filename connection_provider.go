@@ -18,8 +18,6 @@ type ConnectionProvider struct {
 
 	mu    sync.RWMutex
 	pools map[string]*pgxpool.Pool
-
-	options []ConnectionOption
 }
 
 // NewConnectionProvider creates a new pgx-based connection provider.
@@ -27,7 +25,6 @@ func NewConnectionProvider(connectionStringFunc func(string) string, opts ...Con
 	provider := &ConnectionProvider{
 		connectionStringFunc: connectionStringFunc,
 		pools:                make(map[string]*pgxpool.Pool),
-		options:              opts,
 	}
 
 	for _, opt := range opts {
@@ -42,7 +39,11 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 	p.mu.RLock()
 	if pool, exists := p.pools[databaseName]; exists {
 		p.mu.RUnlock()
-		return &DatabaseConnection{Pool: pool}, nil
+		return &DatabaseConnection{
+			Pool:     pool,
+			provider: p,
+			dbName:   databaseName,
+		}, nil
 	}
 	p.mu.RUnlock()
 
@@ -52,7 +53,11 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 
 	// Double-check after acquiring write lock.
 	if pool, exists := p.pools[databaseName]; exists {
-		return &DatabaseConnection{Pool: pool}, nil
+		return &DatabaseConnection{
+			Pool:     pool,
+			provider: p,
+			dbName:   databaseName,
+		}, nil
 	}
 
 	// Parse connection string first.
@@ -84,7 +89,11 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 	}
 
 	p.pools[databaseName] = pool
-	return &DatabaseConnection{Pool: pool}, nil
+	return &DatabaseConnection{
+		Pool:     pool,
+		provider: p,
+		dbName:   databaseName,
+	}, nil
 }
 
 // GetNoRowsSentinel implements pgdbtemplate.ConnectionProvider.GetNoRowsSentinel.
@@ -93,6 +102,11 @@ func (*ConnectionProvider) GetNoRowsSentinel() error {
 }
 
 // Close closes all connection pools managed by this provider.
+//
+// This should be called when the provider is no longer needed, typically
+// in cleanup code or deferred calls. Note that individual DatabaseConnection.Close()
+// calls will also close their respective pools, so this is a safety net for
+// any remaining pools (e.g., the template database pool).
 func (p *ConnectionProvider) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -105,7 +119,9 @@ func (p *ConnectionProvider) Close() {
 
 // DatabaseConnection implements pgdbtemplate.DatabaseConnection using pgx.
 type DatabaseConnection struct {
-	Pool *pgxpool.Pool
+	Pool     *pgxpool.Pool
+	provider *ConnectionProvider
+	dbName   string
 }
 
 // ExecContext implements pgdbtemplate.DatabaseConnection.ExecContext.
@@ -122,10 +138,23 @@ func (c *DatabaseConnection) QueryRowContext(ctx context.Context, query string, 
 
 // Close implements pgdbtemplate.DatabaseConnection.Close.
 //
-// This method does not close the underlying pool, as it might be shared.
-// The pool will be closed when ConnectionProvider.Close() is called.
-func (*DatabaseConnection) Close() error {
-	// Note: We don't close the pool here as it might be shared.
-	// The pool will be closed when ConnectionProvider.Close() is called.
+// This closes and removes the pool for this database from the provider
+// if the pool has been created via Connect().
+//
+// In the pgdbtemplate usage pattern, each test database has a unique name,
+// so pools are not shared and can be safely closed when the connection closes.
+func (c *DatabaseConnection) Close() error {
+	if c.provider == nil {
+		// Connection created without provider tracking.
+		// Happens if someone creates DatabaseConnection manually.
+		return nil
+	}
+
+	c.provider.mu.Lock()
+	defer c.provider.mu.Unlock()
+
+	// Close and remove the pool for this database.
+	c.Pool.Close()
+	delete(c.provider.pools, c.dbName)
 	return nil
 }

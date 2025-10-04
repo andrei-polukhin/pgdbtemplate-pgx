@@ -218,6 +218,188 @@ func TestPgxConnectionProvider(t *testing.T) {
 		_, err := provider.Connect(cancelCtx, "postgres")
 		c.Assert(err, qt.ErrorMatches, "failed to ping database:.*")
 	})
+
+	c.Run("WithMaxConnLifetime option", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(
+			testConnectionStringFuncPgx,
+			pgdbtemplatepgx.WithMaxConns(5),
+			pgdbtemplatepgx.WithMaxConnLifetime(1*time.Hour),
+		)
+		defer provider.Close()
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+
+		// Verify the connection works.
+		var value int
+		row := conn.QueryRowContext(ctx, "SELECT 1")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 1)
+	})
+
+	c.Run("WithMaxConnIdleTime option", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(
+			testConnectionStringFuncPgx,
+			pgdbtemplatepgx.WithMaxConns(5),
+			pgdbtemplatepgx.WithMaxConnIdleTime(30*time.Minute),
+		)
+		defer provider.Close()
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+
+		// Verify the connection works.
+		var value int
+		row := conn.QueryRowContext(ctx, "SELECT 1")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 1)
+	})
+
+	c.Run("All pool time options together", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(
+			testConnectionStringFuncPgx,
+			pgdbtemplatepgx.WithMaxConns(10),
+			pgdbtemplatepgx.WithMinConns(2),
+			pgdbtemplatepgx.WithMaxConnLifetime(2*time.Hour),
+			pgdbtemplatepgx.WithMaxConnIdleTime(45*time.Minute),
+		)
+		defer provider.Close()
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+
+		// Verify the connection works with all options set.
+		var value int
+		row := conn.QueryRowContext(ctx, "SELECT 1")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 1)
+	})
+
+	c.Run("Time options with zero values", func(c *qt.C) {
+		c.Parallel()
+		// Zero values should be acceptable (means no limit).
+		provider := pgdbtemplatepgx.NewConnectionProvider(
+			testConnectionStringFuncPgx,
+			pgdbtemplatepgx.WithMaxConns(5),
+			pgdbtemplatepgx.WithMaxConnLifetime(0),
+			pgdbtemplatepgx.WithMaxConnIdleTime(0),
+		)
+		defer provider.Close()
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+
+		// Verify the connection works even with zero time limits.
+		var value int
+		row := conn.QueryRowContext(ctx, "SELECT 1")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 1)
+	})
+
+	c.Run("DatabaseConnection.Close() removes pool from provider", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+		defer provider.Close()
+
+		// Connect to a database (use postgres as it exists).
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		// Use the connection to verify it works.
+		var value int
+		row := conn.QueryRowContext(ctx, "SELECT 1")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+
+		// Close the connection - this should remove the pool from provider.
+		err = conn.Close()
+		c.Assert(err, qt.IsNil)
+
+		// Connect again to the same database - should create a new pool.
+		conn2, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn2.Close(), qt.IsNil) }()
+
+		// Verify the new connection works.
+		row = conn2.QueryRowContext(ctx, "SELECT 2")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 2)
+	})
+
+	c.Run("Multiple connections closed independently", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+		defer provider.Close()
+
+		// Connect to postgres - they will share the same pool
+		// since it's the same database name.
+		conn1, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		conn2, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		conn3, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		// All connections should work.
+		var value int
+		for i, conn := range []pgdbtemplate.DatabaseConnection{conn1, conn2, conn3} {
+			row := conn.QueryRowContext(ctx, fmt.Sprintf("SELECT %d", i+1))
+			err = row.Scan(&value)
+			c.Assert(err, qt.IsNil)
+			c.Assert(value, qt.Equals, i+1)
+		}
+
+		// Close connections in different order.
+		err = conn2.Close()
+		c.Assert(err, qt.IsNil)
+
+		err = conn1.Close()
+		c.Assert(err, qt.IsNil)
+
+		err = conn3.Close()
+		c.Assert(err, qt.IsNil)
+
+		// Verify we can create new connections after closing.
+		conn4, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		defer func() { c.Assert(conn4.Close(), qt.IsNil) }()
+
+		row := conn4.QueryRowContext(ctx, "SELECT 4")
+		err = row.Scan(&value)
+		c.Assert(err, qt.IsNil)
+		c.Assert(value, qt.Equals, 4)
+	})
+
+	c.Run("Double close is safe", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+		defer provider.Close()
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		// First close should succeed.
+		err = conn.Close()
+		c.Assert(err, qt.IsNil)
+
+		// Second close should not panic or error.
+		err = conn.Close()
+		c.Assert(err, qt.IsNil)
+	})
 }
 
 func TestTemplateManagerWithPgx(t *testing.T) {

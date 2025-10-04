@@ -1,6 +1,8 @@
 package pgdbtemplatepgx
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,5 +27,19 @@ func WithMaxConns(maxConns int32) ConnectionOption {
 func WithMinConns(minConns int32) ConnectionOption {
 	return func(p *ConnectionProvider) {
 		p.poolConfig.MinConns = minConns
+	}
+}
+
+// WithMaxConnLifetime sets the maximum time a connection may be reused.
+func WithMaxConnLifetime(d time.Duration) ConnectionOption {
+	return func(p *ConnectionProvider) {
+		p.poolConfig.MaxConnLifetime = d
+	}
+}
+
+// WithMaxConnIdleTime sets the maximum time a connection may be idle.
+func WithMaxConnIdleTime(d time.Duration) ConnectionOption {
+	return func(p *ConnectionProvider) {
+		p.poolConfig.MaxConnIdleTime = d
 	}
 }
