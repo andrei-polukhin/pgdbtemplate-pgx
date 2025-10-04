@@ -177,7 +177,7 @@ func benchmarkTraditionalDatabaseCreation(b *testing.B, numTables int) {
 		dbName := fmt.Sprintf("bench_traditional_%d_%d", i, time.Now().UnixNano())
 
 		// Create database.
-		adminDB, err := sql.Open("postgres", testConnectionString)
+		adminDB, err := sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 
 		_, err = adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", dbName))
@@ -199,7 +199,7 @@ func benchmarkTraditionalDatabaseCreation(b *testing.B, numTables int) {
 		testPool.Close()
 
 		// Cleanup.
-		adminDB, err = sql.Open("postgres", testConnectionString)
+		adminDB, err = sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 		_, err = adminDB.ExecContext(ctx, fmt.Sprintf("DROP DATABASE %s", dbName))
 		c.Assert(err, qt.IsNil)
@@ -307,7 +307,7 @@ func BenchmarkConcurrentDatabaseCreation_Traditional(b *testing.B) {
 			dbName := fmt.Sprintf("bench_trad_conc_%d_%d_%d", counter, timestamp, os.Getpid())
 
 			// Create database.
-			adminDB, err := sql.Open("postgres", testConnectionString)
+			adminDB, err := sql.Open("pgx", testConnectionString)
 			c.Assert(err, qt.IsNil)
 
 			_, err = adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", dbName))
@@ -328,7 +328,7 @@ func BenchmarkConcurrentDatabaseCreation_Traditional(b *testing.B) {
 			c.Assert(err, qt.IsNil)
 
 			// Cleanup.
-			adminDB, err = sql.Open("postgres", testConnectionString)
+			adminDB, err = sql.Open("pgx", testConnectionString)
 			c.Assert(err, qt.IsNil)
 			_, err = adminDB.ExecContext(ctx, fmt.Sprintf("DROP DATABASE %s", dbName))
 			c.Assert(err, qt.IsNil)
@@ -518,7 +518,7 @@ func benchmarkTraditionalBulkCleanup(b *testing.B, numDBs int) {
 			dbNames = append(dbNames, dbName)
 
 			// Create database.
-			adminDB, err := sql.Open("postgres", testConnectionString)
+			adminDB, err := sql.Open("pgx", testConnectionString)
 			c.Assert(err, qt.IsNil)
 
 			_, err = adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", dbName))
@@ -541,7 +541,7 @@ func benchmarkTraditionalBulkCleanup(b *testing.B, numDBs int) {
 		b.StartTimer()
 
 		// Measure bulk cleanup performance.
-		adminDB, err := sql.Open("postgres", testConnectionString)
+		adminDB, err := sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 
 		for _, dbName := range dbNames {
@@ -592,7 +592,7 @@ func benchmarkTraditionalSequential(b *testing.B, numDBs int) {
 		dbName := fmt.Sprintf("bench_seq_trad_%d_%d_%d", i, time.Now().UnixNano(), os.Getpid())
 
 		// Create database.
-		adminDB, err := sql.Open("postgres", testConnectionString)
+		adminDB, err := sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 
 		_, err = adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", dbName))
@@ -612,7 +612,7 @@ func benchmarkTraditionalSequential(b *testing.B, numDBs int) {
 		testPool.Close()
 
 		// Cleanup.
-		adminDB, err = sql.Open("postgres", testConnectionString)
+		adminDB, err = sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 		_, err = adminDB.ExecContext(ctx, fmt.Sprintf("DROP DATABASE %s", dbName))
 		c.Assert(err, qt.IsNil)
@@ -780,7 +780,7 @@ func benchmarkRealisticTraditionalWorkflow(b *testing.B, numTests, numTables int
 			dbNames = append(dbNames, dbName)
 
 			// Create database.
-			adminDB, err := sql.Open("postgres", testConnectionString)
+			adminDB, err := sql.Open("pgx", testConnectionString)
 			c.Assert(err, qt.IsNil)
 
 			_, err = adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", dbName))
@@ -813,7 +813,7 @@ func benchmarkRealisticTraditionalWorkflow(b *testing.B, numTests, numTables int
 		}
 
 		// Bulk cleanup (similar to what our Cleanup() does).
-		adminDB, err := sql.Open("postgres", testConnectionString)
+		adminDB, err := sql.Open("pgx", testConnectionString)
 		c.Assert(err, qt.IsNil)
 
 		for _, dbName := range dbNames {
