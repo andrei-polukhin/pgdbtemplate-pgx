@@ -400,6 +400,82 @@ func TestPgxConnectionProvider(t *testing.T) {
 		err = conn.Close()
 		c.Assert(err, qt.IsNil)
 	})
+
+	c.Run("Provider.Close() with no pools", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+
+		// Close without creating any connections - should not panic.
+		provider.Close()
+
+		// Calling Close() again should also be safe.
+		provider.Close()
+	})
+
+	c.Run("Provider.Close() after individual connection closes", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		// Close the connection first (removes pool).
+		err = conn.Close()
+		c.Assert(err, qt.IsNil)
+
+		// Now close provider - should handle empty map gracefully.
+		provider.Close()
+	})
+
+	c.Run("DatabaseConnection without provider (manually created)", func(c *qt.C) {
+		c.Parallel()
+		// Create a DatabaseConnection manually without provider.
+		baseConnString := testConnectionStringFuncPgx("postgres")
+		poolConfig, err := pgxpool.ParseConfig(baseConnString)
+		c.Assert(err, qt.IsNil)
+
+		pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+		c.Assert(err, qt.IsNil)
+
+		// Create DatabaseConnection without provider tracking.
+		conn := &pgdbtemplatepgx.DatabaseConnection{
+			Pool: pool,
+			// provider and dbName are nil/empty
+		}
+
+		// Close should not panic even without provider.
+		err = conn.Close()
+		c.Assert(err, qt.IsNil)
+
+		// Manually close the pool since it's not tracked.
+		pool.Close()
+	})
+
+	c.Run("Concurrent Close() calls on provider", func(c *qt.C) {
+		c.Parallel()
+		provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+
+		// Create a connection.
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+
+		// Close both connection and provider concurrently.
+		done := make(chan bool, 2)
+
+		go func() {
+			conn.Close()
+			done <- true
+		}()
+
+		go func() {
+			provider.Close()
+			done <- true
+		}()
+
+		// Wait for both to complete without panic.
+		<-done
+		<-done
+	})
 }
 
 func TestTemplateManagerWithPgx(t *testing.T) {

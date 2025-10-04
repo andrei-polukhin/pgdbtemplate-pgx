@@ -53,11 +53,7 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 
 	// Double-check after acquiring write lock.
 	if pool, exists := p.pools[databaseName]; exists {
-		return &DatabaseConnection{
-			Pool:     pool,
-			provider: p,
-			dbName:   databaseName,
-		}, nil
+		return &DatabaseConnection{Pool: pool, provider: p, dbName: databaseName}, nil
 	}
 
 	// Parse connection string first.
