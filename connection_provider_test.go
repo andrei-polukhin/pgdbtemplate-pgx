@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	qt "github.com/frankban/quicktest"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/andrei-polukhin/pgdbtemplate"
@@ -89,6 +91,13 @@ func TestPgxConnectionProvider(t *testing.T) {
 		baseConnString := testConnectionStringFuncPgx("postgres")
 		poolConfig, err := pgxpool.ParseConfig(baseConnString)
 		c.Assert(err, qt.IsNil)
+		var afterConnectCalls atomic.Int32
+		poolConfig.AfterConnect = func(context.Context, *pgx.Conn) error {
+			afterConnectCalls.Add(1)
+			return nil
+		}
+		poolConfig.HealthCheckPeriod = 2 * time.Second
+		poolConfig.MaxConnLifetimeJitter = 5 * time.Second
 		poolConfig.MaxConns = 3
 		poolConfig.MinConns = 1
 
@@ -101,6 +110,10 @@ func TestPgxConnectionProvider(t *testing.T) {
 		conn, err := provider.Connect(ctx, "postgres")
 		c.Assert(err, qt.IsNil)
 		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+		pgxConn, ok := conn.(*pgdbtemplatepgx.DatabaseConnection)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(pgxConn.Pool.Config().HealthCheckPeriod, qt.Equals, 2*time.Second)
+		c.Assert(pgxConn.Pool.Config().MaxConnLifetimeJitter, qt.Equals, 5*time.Second)
 
 		// Verify the connection works.
 		var value int
@@ -108,6 +121,65 @@ func TestPgxConnectionProvider(t *testing.T) {
 		err = row.Scan(&value)
 		c.Assert(err, qt.IsNil)
 		c.Assert(value, qt.Equals, 1)
+		c.Assert(afterConnectCalls.Load() >= int32(1), qt.IsTrue)
+	})
+
+	c.Run("Pool hooks are invoked", func(c *qt.C) {
+		c.Parallel()
+		baseConnString := testConnectionStringFuncPgx("postgres")
+		poolConfig, err := pgxpool.ParseConfig(baseConnString)
+		c.Assert(err, qt.IsNil)
+
+		var (
+			beforeConnectCalls atomic.Int32
+			afterConnectCalls  atomic.Int32
+			beforeAcquireCalls atomic.Int32
+			afterReleaseCalls  atomic.Int32
+			beforeCloseCalls   atomic.Int32
+		)
+		poolConfig.BeforeConnect = func(context.Context, *pgx.ConnConfig) error {
+			beforeConnectCalls.Add(1)
+			return nil
+		}
+		poolConfig.AfterConnect = func(context.Context, *pgx.Conn) error {
+			afterConnectCalls.Add(1)
+			return nil
+		}
+		poolConfig.BeforeAcquire = func(context.Context, *pgx.Conn) bool {
+			beforeAcquireCalls.Add(1)
+			return true
+		}
+		poolConfig.AfterRelease = func(*pgx.Conn) bool {
+			afterReleaseCalls.Add(1)
+			return true
+		}
+		poolConfig.BeforeClose = func(*pgx.Conn) {
+			beforeCloseCalls.Add(1)
+		}
+
+		provider := pgdbtemplatepgx.NewConnectionProvider(
+			testConnectionStringFuncPgx,
+			pgdbtemplatepgx.WithPoolConfig(*poolConfig),
+		)
+
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		pgxConn, ok := conn.(*pgdbtemplatepgx.DatabaseConnection)
+		c.Assert(ok, qt.IsTrue)
+
+		// Acquire then release a connection to trigger BeforeAcquire and AfterRelease.
+		acquired, err := pgxConn.Pool.Acquire(ctx)
+		c.Assert(err, qt.IsNil)
+		acquired.Release()
+
+		// Close the pool to trigger BeforeClose for all pooled connections.
+		c.Assert(conn.Close(), qt.IsNil)
+
+		c.Assert(beforeConnectCalls.Load() >= 1, qt.IsTrue)
+		c.Assert(afterConnectCalls.Load() >= 1, qt.IsTrue)
+		c.Assert(beforeAcquireCalls.Load() >= 1, qt.IsTrue)
+		c.Assert(afterReleaseCalls.Load() >= 1, qt.IsTrue)
+		c.Assert(beforeCloseCalls.Load() >= 1, qt.IsTrue)
 	})
 
 	c.Run("Connection error handling", func(c *qt.C) {
@@ -231,6 +303,9 @@ func TestPgxConnectionProvider(t *testing.T) {
 		conn, err := provider.Connect(ctx, "postgres")
 		c.Assert(err, qt.IsNil)
 		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+		pgxConn, ok := conn.(*pgdbtemplatepgx.DatabaseConnection)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(pgxConn.Pool.Config().MaxConnLifetime, qt.Equals, 1*time.Hour)
 
 		// Verify the connection works.
 		var value int
@@ -252,6 +327,9 @@ func TestPgxConnectionProvider(t *testing.T) {
 		conn, err := provider.Connect(ctx, "postgres")
 		c.Assert(err, qt.IsNil)
 		defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+		pgxConn, ok := conn.(*pgdbtemplatepgx.DatabaseConnection)
+		c.Assert(ok, qt.IsTrue)
+		c.Assert(pgxConn.Pool.Config().MaxConnIdleTime, qt.Equals, 30*time.Minute)
 
 		// Verify the connection works.
 		var value int
