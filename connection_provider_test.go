@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -705,4 +706,91 @@ func TestHighConcurrencyPoolCreation(t *testing.T) {
 	for _, conn := range conns {
 		conn.Close()
 	}
+}
+
+// TestSharedAdminPoolNotClosedUnderConcurrentUse is a regression test for the
+// bug where concurrent CreateTestDatabase / DropTestDatabase calls shared the
+// same admin pool via the pgx provider cache, and the first goroutine to finish
+// closed that shared pool via defer adminConn.Close(), killing in-flight
+// operations in sibling goroutines ("conn closed" / "context canceled" errors).
+//
+// With the ref-count fix, the pool is only closed after the last reference is
+// released, so concurrent users remain safe.
+func TestSharedAdminPoolNotClosedUnderConcurrentUse(t *testing.T) {
+	t.Parallel()
+	c := qt.New(t)
+	ctx := context.Background()
+
+	provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+	defer provider.Close()
+
+	const numGoroutines = 20
+
+	// Simulate numGoroutines concurrent callers each doing:
+	//   conn := Connect("postgres")  ← all share the same underlying pool
+	//   _ = conn.ExecContext(...)     ← work while others may be closing
+	//   conn.Close()                  ← must not destroy pool for siblings
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+
+			conn, err := provider.Connect(ctx, "postgres")
+			c.Assert(err, qt.IsNil, qt.Commentf("goroutine %d Connect", n))
+			defer func() { c.Assert(conn.Close(), qt.IsNil) }()
+
+			var v int
+			row := conn.QueryRowContext(ctx, fmt.Sprintf("SELECT %d", n))
+			err = row.Scan(&v)
+			c.Assert(err, qt.IsNil, qt.Commentf("goroutine %d Scan", n))
+			c.Assert(v, qt.Equals, n)
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+}
+
+// TestRefCountPoolReleasedAfterAllConnectionsClosed verifies that the
+// underlying pool is actually closed and removed from the provider once every
+// DatabaseConnection that shares it has been closed — i.e. ref-counting reaches
+// zero exactly when expected.
+func TestRefCountPoolReleasedAfterAllConnectionsClosed(t *testing.T) {
+	t.Parallel()
+	c := qt.New(t)
+	ctx := context.Background()
+
+	provider := pgdbtemplatepgx.NewConnectionProvider(testConnectionStringFuncPgx)
+	defer provider.Close()
+
+	const n = 10
+	conns := make([]pgdbtemplate.DatabaseConnection, n)
+	for i := range conns {
+		conn, err := provider.Connect(ctx, "postgres")
+		c.Assert(err, qt.IsNil)
+		conns[i] = conn
+	}
+
+	// Close all but one — pool must still be alive.
+	for i := 0; i < n-1; i++ {
+		c.Assert(conns[i].Close(), qt.IsNil)
+	}
+	var v int
+	err := conns[n-1].QueryRowContext(ctx, "SELECT 1").Scan(&v)
+	c.Assert(err, qt.IsNil, qt.Commentf("pool must still be usable while last reference is held"))
+
+	// Close the last one — pool should now be gone.
+	c.Assert(conns[n-1].Close(), qt.IsNil)
+
+	// Reconnecting must succeed (creates a fresh pool, not a closed one).
+	newConn, err := provider.Connect(ctx, "postgres")
+	c.Assert(err, qt.IsNil)
+	defer func() { c.Assert(newConn.Close(), qt.IsNil) }()
+	err = newConn.QueryRowContext(ctx, "SELECT 1").Scan(&v)
+	c.Assert(err, qt.IsNil)
+	c.Assert(v, qt.Equals, 1)
 }

@@ -4,11 +4,18 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/andrei-polukhin/pgdbtemplate"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// poolEntry holds a connection pool and its active reference count.
+type poolEntry struct {
+	pool *pgxpool.Pool
+	refs atomic.Int32
+}
 
 // ConnectionProvider implements pgdbtemplate.ConnectionProvider
 // using pgx driver with connection pooling.
@@ -17,14 +24,14 @@ type ConnectionProvider struct {
 	poolConfig           pgxpool.Config
 
 	mu    sync.RWMutex
-	pools map[string]*pgxpool.Pool
+	pools map[string]*poolEntry
 }
 
 // NewConnectionProvider creates a new pgx-based connection provider.
 func NewConnectionProvider(connectionStringFunc func(string) string, opts ...ConnectionOption) *ConnectionProvider {
 	provider := &ConnectionProvider{
 		connectionStringFunc: connectionStringFunc,
-		pools:                make(map[string]*pgxpool.Pool),
+		pools:                make(map[string]*poolEntry),
 	}
 
 	for _, opt := range opts {
@@ -37,10 +44,11 @@ func NewConnectionProvider(connectionStringFunc func(string) string, opts ...Con
 func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (pgdbtemplate.DatabaseConnection, error) {
 	// Check if we already have a pool for this database.
 	p.mu.RLock()
-	if pool, exists := p.pools[databaseName]; exists {
+	if entry, exists := p.pools[databaseName]; exists {
+		entry.refs.Add(1)
 		p.mu.RUnlock()
 		return &DatabaseConnection{
-			Pool:     pool,
+			Pool:     entry.pool,
 			provider: p,
 			dbName:   databaseName,
 		}, nil
@@ -52,8 +60,9 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 	defer p.mu.Unlock()
 
 	// Double-check after acquiring write lock.
-	if pool, exists := p.pools[databaseName]; exists {
-		return &DatabaseConnection{Pool: pool, provider: p, dbName: databaseName}, nil
+	if entry, exists := p.pools[databaseName]; exists {
+		entry.refs.Add(1)
+		return &DatabaseConnection{Pool: entry.pool, provider: p, dbName: databaseName}, nil
 	}
 
 	// Parse connection string first.
@@ -76,7 +85,9 @@ func (p *ConnectionProvider) Connect(ctx context.Context, databaseName string) (
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	p.pools[databaseName] = pool
+	entry := &poolEntry{pool: pool}
+	entry.refs.Add(1)
+	p.pools[databaseName] = entry
 	return &DatabaseConnection{
 		Pool:     pool,
 		provider: p,
@@ -136,24 +147,24 @@ func (*ConnectionProvider) GetNoRowsSentinel() error {
 // Close closes all connection pools managed by this provider.
 //
 // This should be called when the provider is no longer needed, typically
-// in cleanup code or deferred calls. Note that individual DatabaseConnection.Close()
-// calls will also close their respective pools, so this is a safety net for
-// any remaining pools (e.g., the template database pool).
+// at the end of a test suite. It forcefully closes all pools regardless
+// of any outstanding references.
 func (p *ConnectionProvider) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for _, pool := range p.pools {
-		pool.Close()
+	for _, entry := range p.pools {
+		entry.pool.Close()
 	}
-	p.pools = make(map[string]*pgxpool.Pool)
+	p.pools = make(map[string]*poolEntry)
 }
 
 // DatabaseConnection implements pgdbtemplate.DatabaseConnection using pgx.
 type DatabaseConnection struct {
-	Pool     *pgxpool.Pool
-	provider *ConnectionProvider
-	dbName   string
+	Pool      *pgxpool.Pool
+	provider  *ConnectionProvider
+	dbName    string
+	closeOnce sync.Once
 }
 
 // ExecContext implements pgdbtemplate.DatabaseConnection.ExecContext.
@@ -170,24 +181,31 @@ func (c *DatabaseConnection) QueryRowContext(ctx context.Context, query string, 
 
 // Close implements pgdbtemplate.DatabaseConnection.Close.
 //
-// This closes and removes the pool for this database from the provider
-// if the pool has been created via Connect().
-//
-// In the pgdbtemplate usage pattern, each test database has a unique name,
-// so pools are not shared and can be safely closed when the connection closes.
+// It decrements the reference count of the underlying pool. The pool is
+// closed and removed from the provider only when the last reference is
+// released. Calling Close more than once is safe and has no effect after
+// the first call.
 func (c *DatabaseConnection) Close() error {
 	if c.provider == nil {
 		// Connection created without provider tracking.
 		// Happens if someone creates DatabaseConnection manually.
-		c.Pool.Close()
+		c.closeOnce.Do(c.Pool.Close)
 		return nil
 	}
 
-	c.provider.mu.Lock()
-	defer c.provider.mu.Unlock()
+	c.closeOnce.Do(func() {
+		c.provider.mu.Lock()
+		defer c.provider.mu.Unlock()
 
-	// Close and remove the pool for this database.
-	c.Pool.Close()
-	delete(c.provider.pools, c.dbName)
+		entry, exists := c.provider.pools[c.dbName]
+		if !exists {
+			// Pool was already removed, e.g. by provider.Close().
+			return
+		}
+		if entry.refs.Add(-1) == 0 {
+			entry.pool.Close()
+			delete(c.provider.pools, c.dbName)
+		}
+	})
 	return nil
 }
